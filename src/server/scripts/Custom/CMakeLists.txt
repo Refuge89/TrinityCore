@@ -13,6 +13,7 @@
 set(scripts_STAT_SRCS
   ${scripts_STAT_SRCS}
 #  ${sources_Custom}
+   Custom/item_lootedQuestItems.cpp
 )
 
 message("  -> Prepared: Custom")

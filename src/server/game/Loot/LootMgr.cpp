@@ -523,7 +523,9 @@ bool LootItem::AllowedForPlayer(Player const* player) const
     }
 
     // check quest requirements
-    if (!(pProto->FlagsCu & ITEM_FLAGS_CU_IGNORE_QUEST_STATUS) && ((needs_quest || (pProto->StartQuest && player->GetQuestStatus(pProto->StartQuest) != QUEST_STATUS_NONE)) && !player->HasQuestForItem(itemid)))
+    if (!(pProto->FlagsCu & ITEM_FLAGS_CU_IGNORE_QUEST_STATUS) &&
+        ((needs_quest || (pProto->StartQuest && player->GetQuestStatus(pProto->StartQuest) != QUEST_STATUS_NONE)) && !player->HasQuestForItem(itemid)) &&
+        !pl->CanDropQuestItem(itemid))
     {
         TC_LOG_DEBUG("lasyan3", "Check quest requirements --> FALSE");
         return false;
