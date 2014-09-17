@@ -1419,7 +1419,18 @@ void Player::Update(uint32 p_time)
 
                 m_zoneUpdateTimer = ZONE_UPDATE_INTERVAL;
             }
-        }
+			/*if (m_mountCanceled && m_mountSpell > 0)
+			{
+				bool isOutdoor;
+				GetBaseMap()->GetAreaFlag(GetPositionX(), GetPositionY(), GetPositionZ(), &isOutdoor);
+				if (!IsInCombat() && isOutdoor)
+				{
+					CastSpell(this, m_mountSpell, true);)
+					m_mountCanceled = false;
+					TC_LOG_DEBUG("lasyan3.automount", "AutoMount casted from Player::Update");
+				}
+			}*/
+		}
         else
             m_zoneUpdateTimer -= p_time;
     }
@@ -6428,8 +6439,15 @@ void Player::CheckAreaExploreAndOutdoor()
     uint32 areaId = GetBaseMap()->GetAreaId(GetPositionX(), GetPositionY(), GetPositionZ(), &isOutdoor);
     AreaTableEntry const* areaEntry = sAreaTableStore.LookupEntry(areaId);
 
-    if (sWorld->getBoolConfig(CONFIG_VMAP_INDOOR_CHECK) && !isOutdoor)
-        RemoveAurasWithAttribute(SPELL_ATTR0_OUTDOORS_ONLY);
+	if (sWorld->getBoolConfig(CONFIG_VMAP_INDOOR_CHECK) && !isOutdoor)
+	{
+		if (IsMounted()) // LASYAN3: AutoMount
+		{
+			m_mountCanceled = true;
+			TC_LOG_DEBUG("lasyan3.automount", "Mounted aura canceled from Player::CheckAreaExploreAndOutdoor");
+		}
+		RemoveAurasWithAttribute(SPELL_ATTR0_OUTDOORS_ONLY);
+	}
 
     if (!areaId)
         return;
@@ -21046,7 +21064,7 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
         RemoveAurasByType(SPELL_AURA_MOUNTED);
         // LASYAN3: AutoMount
         m_mountCanceled = true;
-		TC_LOG_DEBUG("lasyan3.automount", "Mounted aura canceled from ActivateTaxiPathTo");
+		TC_LOG_DEBUG("lasyan3.automount", "Mounted aura canceled from Player::ActivateTaxiPathTo");
 
 
         if (IsInDisallowedMountForm())
