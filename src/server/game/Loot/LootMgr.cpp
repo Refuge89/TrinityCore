@@ -279,17 +279,32 @@ void LootStore::ReportNonExistingId(uint32 lootId, const char* ownerType, uint32
 // RATE_DROP_ITEMS is no longer used for all types of entries
 bool LootStoreItem::Roll(bool rate) const
 {
-    if (chance >= 100.0f)
+    float _chance = chance;
+
+    if (_chance >= 100.0f)
         return true;
 
     if (reference > 0)                                   // reference case
-        return roll_chance_f(chance* (rate ? sWorld->getRate(RATE_DROP_ITEM_REFERENCED) : 1.0f));
+        return roll_chance_f(_chance* (rate ? sWorld->getRate(RATE_DROP_ITEM_REFERENCED) : 1.0f));
 
     ItemTemplate const* pProto = sObjectMgr->GetItemTemplate(itemid);
 
     float qualityModifier = pProto && rate ? sWorld->getRate(qualityToRate[pProto->Quality]) : 1.0f;
 
-    return roll_chance_f(chance*qualityModifier);
+    // LASYAN3 : apply minimum drop rate for rare items
+    float _rate;
+    switch (pProto->Quality)
+    {
+        case ITEM_QUALITY_UNCOMMON: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_UNCOMMON); break;
+        case ITEM_QUALITY_RARE: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_RARE); break;
+        case ITEM_QUALITY_EPIC: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_EPIC); break;
+        case ITEM_QUALITY_LEGENDARY: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_LEGEND); break;
+        case ITEM_QUALITY_ARTIFACT: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_ART); break;
+        default: _rate = 0; break;
+    }
+    _chance = (chance < _rate && _rate > 0) ? _rate : chance;
+
+    return roll_chance_f(_chance*qualityModifier);
 }
 
 // Checks correctness of values
@@ -371,29 +386,150 @@ LootItem::LootItem(LootStoreItem const& li)
 // Basic checks for player/item compatibility - if false no chance to see the item in the loot
 bool LootItem::AllowedForPlayer(Player const* player) const
 {
-    // DB conditions check
-    if (!sConditionMgr->IsObjectMeetToConditions(const_cast<Player*>(player), conditions))
-        return false;
-
     ItemTemplate const* pProto = sObjectMgr->GetItemTemplate(itemid);
     if (!pProto)
+    {
+        TC_LOG_DEBUG("lasyan3", "AllowedForPlayer - Item %d not recognized!", itemid);
         return false;
+    }
+
+    TC_LOG_DEBUG("lasyan3", "AllowedForPlayer - Loot %d [%s]", itemid, pProto->Name1.c_str());
+
+    Player * pl = const_cast<Player*>(player);
+
+    // DB conditions check
+    if (!sConditionMgr->IsObjectMeetToConditions(pl, conditions))
+    {
+        TC_LOG_DEBUG("lasyan3", "IsObjectMeetToConditions --> FALSE");
+        return false;
+    }
+
+    // LASYAN3 : Loot only for player
+    if (sWorld->getBoolConfig(CONFIG_LOOT_ONLY_FOR_PLAYER) && (pProto->Class == ITEM_CLASS_ARMOR || pProto->Class == ITEM_CLASS_WEAPON))
+    {
+        const static uint32 item_weapon_skills[MAX_ITEM_SUBCLASS_WEAPON] =
+        {
+            SKILL_AXES, SKILL_2H_AXES, SKILL_BOWS, SKILL_GUNS, SKILL_MACES,
+            SKILL_2H_MACES, SKILL_POLEARMS, SKILL_SWORDS, SKILL_2H_SWORDS, 0,
+            SKILL_STAVES, 0, 0, SKILL_FIST_WEAPONS, 0,
+            SKILL_DAGGERS, SKILL_THROWN, SKILL_ASSASSINATION, SKILL_CROSSBOWS, SKILL_WANDS,
+            SKILL_FISHING
+        };
+
+        const static uint32 item_armor_skills[MAX_ITEM_SUBCLASS_ARMOR] =
+        {
+            0, SKILL_CLOTH, SKILL_LEATHER, SKILL_MAIL, SKILL_PLATE_MAIL, 0, SKILL_SHIELD, 0, 0, 0, 0
+        };
+
+        InventoryResult _ir = player->CanUseItem(sObjectMgr->GetItemTemplate(itemid));
+        if (_ir != EQUIP_ERR_CANT_EQUIP_LEVEL_I && _ir != EQUIP_ERR_OK)
+        {
+            TC_LOG_INFO("lasyan3", "Loot cannot be used by player %s (OTHER=%d) : %s", player->GetName().c_str(), _ir, pProto->Name1.c_str());
+            return false;
+        }
+
+        uint32 itemSkill;
+        switch (pProto->Class)
+        {
+            case ITEM_CLASS_WEAPON:
+                if (pProto->SubClass >= MAX_ITEM_SUBCLASS_WEAPON)
+                    itemSkill = 0;
+                else
+                    itemSkill = item_weapon_skills[pProto->SubClass];
+                break;
+
+            case ITEM_CLASS_ARMOR:
+                if (pProto->SubClass >= MAX_ITEM_SUBCLASS_ARMOR)
+                    itemSkill = 0;
+                else
+                    itemSkill = item_armor_skills[pProto->SubClass];
+                break;
+
+            default:
+                itemSkill = 0;
+        }
+
+        if (itemSkill != 0)
+        {
+            bool allowEquip = false;
+            // Armor that is binded to account can "morph" from plate to mail, etc. if skill is not learned yet.
+            if (pProto->Quality == ITEM_QUALITY_HEIRLOOM && pProto->Class == ITEM_CLASS_ARMOR && !player->HasSkill(itemSkill))
+            {
+                /// @todo when you right-click already equipped item it throws EQUIP_ERR_NO_REQUIRED_PROFICIENCY.
+
+                // In fact it's a visual bug, everything works properly... I need sniffs of operations with
+                // binded to account items from off server.
+
+                switch (player->getClass())
+                {
+                    case CLASS_HUNTER:
+                    case CLASS_SHAMAN:
+                        allowEquip = (itemSkill == SKILL_MAIL);
+                        break;
+                    case CLASS_PALADIN:
+                    case CLASS_WARRIOR:
+                        allowEquip = (itemSkill == SKILL_PLATE_MAIL);
+                        break;
+                }
+            }
+            if (!allowEquip && player->GetSkillValue(itemSkill) == 0)
+            {
+                TC_LOG_INFO("lasyan3", "Loot cannot be equip by player %s: %s", player->GetName().c_str(), pProto->Name1.c_str());
+                return false;
+            }
+        }
+
+        if (pProto->RequiredReputationFaction && uint32(player->GetReputationRank(pProto->RequiredReputationFaction)) < pProto->RequiredReputationRank)
+        {
+            TC_LOG_INFO("lasyan3", "Loot cannot be used by player %s (REPUTATION) : %s", player->GetName().c_str(), pProto->Name1.c_str());
+            return false;
+        }
+    }
 
     // not show loot for players without profession or those who already know the recipe
-    if ((pProto->Flags & ITEM_PROTO_FLAG_SMART_LOOT) && (!player->HasSkill(pProto->RequiredSkill) || player->HasSpell(pProto->Spells[1].SpellId)))
-        return false;
+    if (sWorld->getBoolConfig(CONFIG_LOOT_ONLY_FOR_PLAYER) && pProto->Class == ITEM_CLASS_RECIPE)
+    {
+        if (!player->HasSkill(pProto->RequiredSkill) || player->HasSpell(pProto->Spells[1].SpellId))
+        {
+            TC_LOG_DEBUG("lasyan3", "Player does not have the profession for this item, or alread know the recipe!");
+            return false;
+        }
+    }
 
     // not show loot for not own team
-    if ((pProto->Flags2 & ITEM_FLAGS_EXTRA_HORDE_ONLY) && player->GetTeam() != HORDE)
-        return false;
+    /*if ((pProto->Flags2 & ITEM_FLAGS_EXTRA_HORDE_ONLY) && player->GetTeam() != HORDE)
+    {
+    TC_LOG_DEBUG("lasyan3", "This item is only for the Horde!");
+    TC_LOG_INFO("lasyan3", "%s is only for the Horde!", pProto->Name1.c_str());
+    return false;
+    }
 
     if ((pProto->Flags2 & ITEM_FLAGS_EXTRA_ALLIANCE_ONLY) && player->GetTeam() != ALLIANCE)
-        return false;
+    {
+    TC_LOG_DEBUG("lasyan3", "This item is only for the Alliance!");
+    TC_LOG_INFO("lasyan3", "%s is only for the Alliance!", pProto->Name1.c_str());
+    return false;
+    }*/
+
+    // LASYAN3 : Loot only one item
+    if (sWorld->getBoolConfig(CONFIG_LOOT_UNIQUE) && 
+        (pProto->Class == ITEM_CLASS_RECIPE || pProto->Class == ITEM_CLASS_ARMOR || pProto->Class == ITEM_CLASS_WEAPON || pProto->Class == ITEM_CLASS_KEY))
+    {
+        if (player->HasItemCount(itemid, 1, true))
+        {
+            TC_LOG_INFO("lasyan3", "Only one exemplary allowed for player %s: %s", player->GetName().c_str(), pProto->Name1.c_str());
+            return false;
+        }
+    }
 
     // check quest requirements
     if (!(pProto->FlagsCu & ITEM_FLAGS_CU_IGNORE_QUEST_STATUS) && ((needs_quest || (pProto->StartQuest && player->GetQuestStatus(pProto->StartQuest) != QUEST_STATUS_NONE)) && !player->HasQuestForItem(itemid)))
+    {
+        TC_LOG_DEBUG("lasyan3", "Check quest requirements --> FALSE");
         return false;
+    }
 
+    TC_LOG_DEBUG("lasyan3", "Loot allowed for %s", pProto->Name1.c_str());
     return true;
 }
 
@@ -598,6 +734,11 @@ QuestItemList* Loot::FillNonQuestNonFFAConditionalLoot(Player* player, bool pres
                     item.is_counted = true;
                 }
             }
+        }
+        else // LASYAN3 : Loot only for player
+        {
+            --unlootedCount;
+            item.is_counted = false;
         }
     }
     if (ql->empty())
