@@ -15203,6 +15203,7 @@ void Player::CompleteQuest(uint32 quest_id)
             else
                 SendQuestComplete(quest_id);
         }
+		AutoQuestCompleteDisplayQuestGiver(quest_id);
     }
 
     if (sWorld->getBoolConfig(CONFIG_QUEST_ENABLE_QUEST_TRACKER)) // check if Quest Tracker is enabled
@@ -16961,6 +16962,47 @@ bool Player::HasPvPForcingQuest() const
     }
 
     return false;
+}
+
+void Player::AutoQuestCompleteDisplayQuestGiver(uint32 p_questId)
+{
+    if (sWorld->getIntConfig(CONFIG_QUEST_AUTOCOMPLETE_DELAY) == 0) return;
+    std::ostringstream sql;
+    sql << "SELECT c.id FROM creature c"
+        << " INNER JOIN creature_queststarter s ON s.id = c.id"
+        << " INNER JOIN creature_questender e ON e.id = c.id AND e.quest = s.quest"
+        << " WHERE e.quest = %d";
+    QueryResult result = WorldDatabase.PQuery(sql.str().c_str(), p_questId);
+    if (!result)
+        return;
+    if (result->GetRowCount() > 1)
+        return;
+
+	uint32 entry = (*result)[0].GetUInt32();
+	bool visible = false;
+	for (GuidList::const_iterator itr = m_clientGUIDs.begin(); itr != m_clientGUIDs.end(); ++itr)
+	{
+		if (!itr->IsCreatureOrPet() && !itr->IsCreatureOrVehicle()) continue;
+		Creature* questgiver = ObjectAccessor::GetCreatureOrPetOrVehicle(*this, *itr);
+		if (!questgiver || questgiver->IsHostileTo(this))
+			continue;
+		if (!questgiver->HasFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_QUESTGIVER))
+			continue;
+		if (questgiver->GetEntry() == entry)
+			return; // Quest giver already exists on the same map than the player
+	}
+	TempSummon *_sum = SummonCreature(entry, GetPositionX(), GetPositionY(), GetPositionZ(), 3.3f, TEMPSUMMON_TIMED_DESPAWN, sWorld->getIntConfig(CONFIG_QUEST_AUTOCOMPLETE_DELAY) * 1000);
+	_sum->SetInFront(this);
+	// remove fake death
+	if (HasUnitState(UNIT_STATE_DIED))
+		RemoveAurasByType(SPELL_AURA_FEIGN_DEATH);
+	// Stop the npc if moving
+	_sum->StopMoving();
+	_sum->SetReactState(REACT_PASSIVE);
+	// Display quest popup
+	m_lastQuestCompleted = sObjectMgr->GetQuestTemplate(p_questId);
+	PrepareGossipMenu(_sum, _sum->GetCreatureTemplate()->GossipMenuId, true);
+	SendPreparedGossip(_sum);
 }
 
 /*********************************************************/
