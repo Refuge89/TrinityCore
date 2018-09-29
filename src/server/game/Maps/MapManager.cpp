@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 TrinityCore <http://www.trinitycore.org/>
+ * Copyright (C) 2008-2018 TrinityCore <https://www.trinitycore.org/>
  * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -36,6 +36,10 @@
 #include "WorldSession.h"
 #include "Opcodes.h"
 
+//npcbot
+#include "botmgr.h"
+//end npcbot
+
 MapManager::MapManager()
     : _nextInstanceId(0), _scheduledScripts(0)
 {
@@ -53,11 +57,87 @@ void MapManager::Initialize()
     // Start mtmaps if needed.
     if (num_threads > 0)
         m_updater.activate(num_threads);
+
+    //npcbot - spawn bots
+    BotMgr::LoadConfig();
+
+    if (!BotMgr::IsNpcBotModEnabled())
+        return;
+
+    uint32 botoldMSTime = getMSTime();
+
+    TC_LOG_INFO("server.loading", "Starting NpcBot system...");
+    PreparedStatement* botstmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_NPCBOTS);
+    //"SELECT entry FROM characters_npcbot", CONNECTION_SYNCH
+    PreparedQueryResult res = CharacterDatabase.Query(botstmt);
+    if (!res)
+    {
+        TC_LOG_INFO("server.loading", ">> Spawned 0 npcbots. Table `characters_npcbot` is empty!");
+        return;
+    }
+
+    PreparedQueryResult infores;
+    uint32 botcounter = 0;
+    Field* field;
+    std::list<uint32> botgrids;
+    do
+    {
+        field = res->Fetch();
+        uint32 entry = field[0].GetUInt32();
+        CreatureTemplate const* proto = sObjectMgr->GetCreatureTemplate(entry);
+        if (!proto)
+        {
+            TC_LOG_ERROR("server.loading", "Cannot find creature_template entry for npcbot (id: %u)!", entry);
+            continue;
+        }
+
+        botstmt = WorldDatabase.GetPreparedStatement(WORLD_SEL_NPCBOT_INFO);
+        //"SELECT guid, map, position_x, position_y, position_z, orientation FROM creature WHERE id = ?", CONNECTION_SYNCH
+        botstmt->setUInt32(0, entry);
+        infores = WorldDatabase.Query(botstmt);
+        if (!infores)
+        {
+            TC_LOG_ERROR("server.loading", "Cannot spawn npcbot %s (id: %u), not found in `creature` table!", proto->Name.c_str(), entry);
+            continue;
+        }
+
+        field = infores->Fetch();
+        uint32 tableGuid = field[0].GetUInt32();
+        uint32 mapId = uint32(field[1].GetUInt16());
+        float pos_x = field[2].GetFloat();
+        float pos_y = field[3].GetFloat();
+        //float pos_z = field[4].GetFloat();
+        //float ori = field[5].GetFloat();
+
+        CellCoord c = Trinity::ComputeCellCoord(pos_x, pos_y);
+        GridCoord g = Trinity::ComputeGridCoord(pos_x, pos_y);
+        ASSERT(c.IsCoordValid() && "Invalid Cell coord!");
+        ASSERT(g.IsCoordValid() && "Invalid Grid coord!");
+        Map* npcbotmap = sMapMgr->CreateBaseMap(mapId);
+        npcbotmap->LoadGrid(pos_x, pos_y);
+        /*Creature* bot = npcbotmap->GetCreature(MAKE_NEW_GUID(tableGuid, entry, HIGHGUID_UNIT));
+        ASSERT(bot);
+        //debug
+        if (!bot->IsAlive())
+        {
+            bot->Respawn();
+            bot->ResetBotAI(1);
+        }*/
+
+        TC_LOG_DEBUG("server.loading", ">> Spawned npcbot %s (id: %u, map: %u, grid: %u, cell: %u)", proto->Name.c_str(), entry, mapId, g.GetId(), c.GetId());
+        botgrids.push_back(g.GetId());
+        ++botcounter;
+
+    } while (res->NextRow());
+
+    botgrids.unique();
+    TC_LOG_INFO("server.loading", ">> Spawned %u npcbot(s) within %u grid(s)", botcounter, botgrids.size());
+    //end npcbot
 }
 
 void MapManager::InitializeVisibilityDistanceInfo()
 {
-    for (MapMapType::iterator iter=i_maps.begin(); iter != i_maps.end(); ++iter)
+    for (MapMapType::iterator iter = i_maps.begin(); iter != i_maps.end(); ++iter)
         (*iter).second->InitVisibilityDistance();
 }
 
@@ -71,7 +151,7 @@ Map* MapManager::CreateBaseMap(uint32 id)
 {
     Map* map = FindBaseMap(id);
 
-    if (map == NULL)
+    if (map == nullptr)
     {
         std::lock_guard<std::mutex> lock(_mapsLock);
 
@@ -98,7 +178,7 @@ Map* MapManager::FindBaseNonInstanceMap(uint32 mapId) const
 {
     Map* map = FindBaseMap(mapId);
     if (map && map->Instanceable())
-        return NULL;
+        return nullptr;
     return map;
 }
 
@@ -116,10 +196,10 @@ Map* MapManager::FindMap(uint32 mapid, uint32 instanceId) const
 {
     Map* map = FindBaseMap(mapid);
     if (!map)
-        return NULL;
+        return nullptr;
 
     if (!map->Instanceable())
-        return instanceId == 0 ? map : NULL;
+        return instanceId == 0 ? map : nullptr;
 
     return ((MapInstanced*)map)->FindInstanceMap(instanceId);
 }
@@ -309,55 +389,48 @@ void MapManager::InitInstanceIds()
 {
     _nextInstanceId = 1;
 
-    QueryResult result = CharacterDatabase.Query("SELECT MAX(id) FROM instance");
-    if (result)
-    {
-        uint32 maxId = (*result)[0].GetUInt32();
+    if (QueryResult result = CharacterDatabase.Query("SELECT IFNULL(MAX(id), 0) FROM instance"))
+        _freeInstanceIds.resize((*result)[0].GetUInt64() + 2, true); // make space for one extra to be able to access [_nextInstanceId] index in case all slots are taken
+    else
+        _freeInstanceIds.resize(_nextInstanceId + 1, true);
 
-        // Resize to multiples of 32 (vector<bool> allocates memory the same way)
-        _instanceIds.resize((maxId / 32) * 32 + (maxId % 32 > 0 ? 32 : 0));
-    }
+    // never allow 0 id
+    _freeInstanceIds[0] = false;
 }
 
 void MapManager::RegisterInstanceId(uint32 instanceId)
 {
     // Allocation and sizing was done in InitInstanceIds()
-    _instanceIds[instanceId] = true;
+    _freeInstanceIds[instanceId] = false;
+
+    // Instances are pulled in ascending order from db and nextInstanceId is initialized with 1,
+    // so if the instance id is used, increment until we find the first unused one for a potential new instance
+    if (_nextInstanceId == instanceId)
+        ++_nextInstanceId;
 }
 
 uint32 MapManager::GenerateInstanceId()
 {
-    uint32 newInstanceId = _nextInstanceId;
-
-    // Find the lowest available id starting from the current NextInstanceId (which should be the lowest according to the logic in FreeInstanceId()
-    for (uint32 i = ++_nextInstanceId; i < 0xFFFFFFFF; ++i)
-    {
-        if ((i < _instanceIds.size() && !_instanceIds[i]) || i >= _instanceIds.size())
-        {
-            _nextInstanceId = i;
-            break;
-        }
-    }
-
-    if (newInstanceId == _nextInstanceId)
+    if (_nextInstanceId == 0xFFFFFFFF)
     {
         TC_LOG_ERROR("maps", "Instance ID overflow!! Can't continue, shutting down server. ");
         World::StopNow(ERROR_EXIT_CODE);
+        return _nextInstanceId;
     }
 
-    // Allocate space if necessary
-    if (newInstanceId >= uint32(_instanceIds.size()))
+    uint32 newInstanceId = _nextInstanceId;
+    ASSERT(newInstanceId < _freeInstanceIds.size());
+    _freeInstanceIds[newInstanceId] = false;
+
+    // Find the lowest available id starting from the current NextInstanceId (which should be the lowest according to the logic in FreeInstanceId()
+    size_t nextFreedId = _freeInstanceIds.find_next(_nextInstanceId++);
+    if (nextFreedId == InstanceIds::npos)
     {
-        // Due to the odd memory allocation behavior of vector<bool> we match size to capacity before triggering a new allocation
-        if (_instanceIds.size() < _instanceIds.capacity())
-        {
-            _instanceIds.resize(_instanceIds.capacity());
-        }
-        else
-            _instanceIds.resize((newInstanceId / 32) * 32 + (newInstanceId % 32 > 0 ? 32 : 0));
+        _nextInstanceId = uint32(_freeInstanceIds.size());
+        _freeInstanceIds.push_back(true);
     }
-
-    _instanceIds[newInstanceId] = true;
+    else
+        _nextInstanceId = uint32(nextFreedId);
 
     return newInstanceId;
 }
@@ -365,8 +438,6 @@ uint32 MapManager::GenerateInstanceId()
 void MapManager::FreeInstanceId(uint32 instanceId)
 {
     // If freed instance id is lower than the next id available for new instances, use the freed one instead
-    if (instanceId < _nextInstanceId)
-        SetNextInstanceId(instanceId);
-
-    _instanceIds[instanceId] = false;
+    _nextInstanceId = std::min(instanceId, _nextInstanceId);
+    _freeInstanceIds[instanceId] = true;
 }

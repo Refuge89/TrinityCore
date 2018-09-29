@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 TrinityCore <http://www.trinitycore.org/>
+ * Copyright (C) 2008-2018 TrinityCore <https://www.trinitycore.org/>
  * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -22,7 +22,7 @@
 // For static or at-server-startup loaded spell data
 
 #include "Define.h"
-#include "DBCStructure.h"
+#include "Duration.h"
 #include "SharedDefines.h"
 #include "Util.h"
 
@@ -30,6 +30,7 @@
 #include <set>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 class SpellInfo;
 class Player;
@@ -228,7 +229,7 @@ enum ProcFlagsHit
     PROC_HIT_DEFLECT             = 0x0000200,
     PROC_HIT_ABSORB              = 0x0000400, // partial or full absorb
     PROC_HIT_REFLECT             = 0x0000800,
-    PROC_HIT_INTERRUPT           = 0x0001000, // (not used atm)
+    PROC_HIT_INTERRUPT           = 0x0001000,
     PROC_HIT_FULL_BLOCK          = 0x0002000,
     PROC_HIT_MASK_ALL            = 0x0002FFF
 };
@@ -586,7 +587,7 @@ class TC_GAME_API SpellMgr
         static SpellMgr* instance();
 
         // Spell correctness for client using
-        static bool IsSpellValid(SpellInfo const* spellInfo, Player* player = NULL, bool msg = true);
+        static bool IsSpellValid(SpellInfo const* spellInfo, Player* player = nullptr, bool msg = true);
 
         // Spell difficulty
         uint32 GetSpellDifficultyId(uint32 spellId) const;
@@ -662,7 +663,7 @@ class TC_GAME_API SpellMgr
         SpellAreaForQuestAreaMapBounds GetSpellAreaForQuestAreaMapBounds(uint32 area_id, uint32 quest_id) const;
 
         // SpellInfo object management
-        SpellInfo const* GetSpellInfo(uint32 spellId) const { return spellId < GetSpellInfoStoreSize() ?  mSpellInfoMap[spellId] : NULL; }
+        SpellInfo const* GetSpellInfo(uint32 spellId) const { return spellId < GetSpellInfoStoreSize() ?  mSpellInfoMap[spellId] : nullptr; }
         // Use this only with 100% valid spellIds
         SpellInfo const* AssertSpellInfo(uint32 spellId) const
         {
@@ -674,7 +675,7 @@ class TC_GAME_API SpellMgr
         uint32 GetSpellInfoStoreSize() const { return mSpellInfoMap.size(); }
 
     private:
-        SpellInfo* _GetSpellInfo(uint32 spellId) { return spellId < GetSpellInfoStoreSize() ?  mSpellInfoMap[spellId] : NULL; }
+        SpellInfo* _GetSpellInfo(uint32 spellId) { return spellId < GetSpellInfoStoreSize() ?  mSpellInfoMap[spellId] : nullptr; }
 
     // Modifiers
     public:

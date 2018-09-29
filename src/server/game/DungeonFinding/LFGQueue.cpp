@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 TrinityCore <http://www.trinitycore.org/>
+ * Copyright (C) 2008-2018 TrinityCore <https://www.trinitycore.org/>
  *
  * This program is free software you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,10 +19,13 @@
 #include "Containers.h"
 #include "DBCStructure.h"
 #include "DBCStores.h"
+#include "GameTime.h"
 #include "Group.h"
 #include "LFGQueue.h"
 #include "LFGMgr.h"
 #include "Log.h"
+
+#include "../Entities/Player/Player.h"
 
 namespace lfg
 {
@@ -79,6 +82,10 @@ char const* GetCompatibleString(LfgCompatibility compatibles)
             return "Unknown";
     }
 }
+
+LfgQueueData::LfgQueueData() : joinTime(GameTime::GetGameTime()), tanks(LFG_TANKS_NEEDED),
+healers(LFG_HEALERS_NEEDED), dps(LFG_DPS_NEEDED)
+{ }
 
 std::string LFGQueue::GetDetailedMatchRoles(GuidList const& check) const
 {
@@ -283,7 +290,7 @@ LfgCompatibilityData* LFGQueue::GetCompatibilityData(std::string const& key)
     if (itr != CompatibleMapStore.end())
         return &(itr->second);
 
-    return NULL;
+    return nullptr;
 }
 
 uint8 LFGQueue::FindGroups()
@@ -508,7 +515,7 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
     else
     {
         ObjectGuid gguid = *check.begin();
-        const LfgQueueData &queue = QueueDataStore[gguid];
+        LfgQueueData const& queue = QueueDataStore[gguid];
         proposalDungeons = queue.dungeons;
         proposalRoles = queue.roles;
         LFGMgr::CheckGroupRoles(proposalRoles);          // assing new roles
@@ -527,6 +534,21 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
         SetCompatibilityData(strGuids, data);
         return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
     }
+    // playerbot mod
+    bool nonBotFound = false;
+    for (GuidList::const_iterator it = check.begin(); it != check.end(); ++it)
+    {
+        ObjectGuid guid = *it;
+        Player *player = ObjectAccessor::FindPlayerByLowGUID(guid);
+        if (guid.IsGroup() || (player && !player->GetPlayerbotAI()))
+        {
+            nonBotFound = true;
+            break;
+        }
+    }
+    if (!nonBotFound)
+        return LFG_INCOMPATIBLES_HAS_IGNORES;
+    // end of playerbot mod
 
     ObjectGuid gguid = *check.begin();
     proposal.queues = check;
@@ -540,7 +562,7 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
     }
 
     // Create a new proposal
-    proposal.cancelTime = time(NULL) + LFG_TIME_PROPOSAL;
+    proposal.cancelTime = GameTime::GetGameTime() + LFG_TIME_PROPOSAL;
     proposal.state = LFG_PROPOSAL_INITIATING;
     proposal.leader.Clear();
     proposal.dungeonId = Trinity::Containers::SelectRandomContainerElement(proposalDungeons);
@@ -674,7 +696,7 @@ std::string LFGQueue::DumpCompatibleInfo(bool full /* = false */) const
             {
                 o << " (";
                 bool first = true;
-                for (const auto& role : itr->second.roles)
+                for (auto const& role : itr->second.roles)
                 {
                     if (!first)
                         o << "|";

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 TrinityCore <http://www.trinitycore.org/>
+ * Copyright (C) 2008-2018 TrinityCore <https://www.trinitycore.org/>
  * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -24,24 +24,23 @@
 #define __WORLD_H
 
 #include "Common.h"
+#include "DatabaseEnvFwd.h"
+#include "LockedQueue.h"
 #include "ObjectGuid.h"
-#include "Timer.h"
-#include "SharedDefines.h"
-#include "QueryResult.h"
 #include "QueryCallbackProcessor.h"
-#include "Realm/Realm.h"
+#include "SharedDefines.h"
+#include "Timer.h"
 
 #include <atomic>
-#include <map>
-#include <set>
 #include <list>
+#include <map>
+#include <unordered_map>
 
-class Object;
+class Player;
 class WorldPacket;
 class WorldSession;
-class Player;
 class WorldSocket;
-class SystemMgr;
+struct Realm;
 
 // ServerMessages.dbc
 enum ServerMessageType
@@ -53,14 +52,14 @@ enum ServerMessageType
     SERVER_MSG_RESTART_CANCELLED  = 5
 };
 
-enum ShutdownMask
+enum ShutdownMask : uint32
 {
     SHUTDOWN_MASK_RESTART = 1,
     SHUTDOWN_MASK_IDLE    = 2,
     SHUTDOWN_MASK_FORCE   = 4
 };
 
-enum ShutdownExitCode
+enum ShutdownExitCode : uint32
 {
     SHUTDOWN_EXIT_CODE = 0,
     ERROR_EXIT_CODE    = 1,
@@ -162,6 +161,18 @@ enum WorldBoolConfigs
     CONFIG_EVENT_ANNOUNCE,
     CONFIG_STATS_LIMITS_ENABLE,
     CONFIG_INSTANCES_RESET_ANNOUNCE,
+    CONFIG_AHBOT_ENABLED,
+    CONFIG_AIPLYERBOT_ENABLED,
+    CONFIG_AIPLYERBOT_ALLOWGUILDBOTS,
+    CONFIG_AIPLYERBOT_RANDOMBOTAUTOLOGIN,
+    CONFIG_AIPLYERBOT_RANDOMBOTLOGINATSTARTUP,
+    CONFIG_AIPLYERBOT_RANDOMBOTJOINLFG,
+    CONFIG_AIPLYERBOT_LOGINGROUPONLY,
+    CONFIG_AIPLYERBOT_LOGVALUESPERTICK,
+    CONFIG_AIPLYERBOT_FLEEINGENABLED,
+    CONFIG_AIPLYERBOT_DELETERANDOMBOTACCOUNTS,
+    CONFIG_AIPLYERBOT_DELETERANDOMBOTGUILDS,
+    CONFIG_AIPLYERBOT_GUILDTASKENABLED,
     CONFIG_IP_BASED_ACTION_LOGGING,
     CONFIG_ALLOW_TRACK_BOTH_RESOURCES,
     CONFIG_CALCULATE_CREATURE_ZONE_AREA_DATA,
@@ -178,6 +189,8 @@ enum WorldBoolConfigs
     CONFIG_HOTSWAP_PREFIX_CORRECTION_ENABLED,
     CONFIG_PREVENT_RENAME_CUSTOMIZATION,
     CONFIG_CACHE_DATA_QUERIES,
+    CONFIG_CHECK_GOBJECT_LOS,
+    CONFIG_RESPAWN_DYNAMIC_ESCORTNPC,
     BOOL_CONFIG_VALUE_COUNT
 };
 
@@ -201,6 +214,25 @@ enum WorldFloatConfigs
     CONFIG_ARENA_WIN_RATING_MODIFIER_2,
     CONFIG_ARENA_LOSE_RATING_MODIFIER,
     CONFIG_ARENA_MATCHMAKER_RATING_MODIFIER,
+    CONFIG_RESPAWN_DYNAMICRATE_CREATURE,
+    CONFIG_RESPAWN_DYNAMICRATE_GAMEOBJECT,
+	CONFIG_AHBOT_PRICEMULTIPLIER,
+    CONFIG_AHBOT_PRICEQUALITYMULTIPLY,
+    CONFIG_AHBOT_UNDERPRICEPROB,
+    CONFIG_AIPLYERBOT_SIGHTDISTANCE,
+    CONFIG_AIPLYERBOT_SPELLDISTANCE,
+    CONFIG_AIPLYERBOT_REACTDISTANCE,
+    CONFIG_AIPLYERBOT_GRINDDISTANCE,
+    CONFIG_AIPLYERBOT_LOOTDISTANCE,
+    CONFIG_AIPLYERBOT_FLEEDISTANCE,
+    CONFIG_AIPLYERBOT_TOOCLOSEDISTANCE,
+    CONFIG_AIPLYERBOT_MELEEDISTANCE,
+    CONFIG_AIPLYERBOT_FOLLOWDISTANCE,
+    CONFIG_AIPLYERBOT_WHISPERDISTANCE,
+    CONFIG_AIPLYERBOT_CONTACTDISTANCE,
+    CONFIG_AIPLYERBOT_RANDOMGEARLOWERINGCHANCE,
+    CONFIG_AIPLYERBOT_RANDOMBOTMAXLEVELCHANCE,
+    CONFIG_AIPLYERBOT_RANDOMCHANGEMULTIPLIER,
     FLOAT_CONFIG_VALUE_COUNT
 };
 
@@ -247,6 +279,9 @@ enum WorldIntConfigs
     CONFIG_DAILY_QUEST_RESET_TIME_HOUR,
     CONFIG_MAX_PRIMARY_TRADE_SKILL,
     CONFIG_MIN_PETITION_SIGNS,
+    CONFIG_MIN_QUEST_SCALED_XP_RATIO,
+    CONFIG_MIN_CREATURE_SCALED_XP_RATIO,
+    CONFIG_MIN_DISCOVERED_SCALED_XP_RATIO,
     CONFIG_GM_LOGIN_STATE,
     CONFIG_GM_VISIBLE_STATE,
     CONFIG_GM_ACCEPT_TICKETS,
@@ -259,6 +294,7 @@ enum WorldIntConfigs
     CONFIG_FORCE_SHUTDOWN_THRESHOLD,
     CONFIG_GROUP_VISIBILITY,
     CONFIG_MAIL_DELIVERY_DELAY,
+    CONFIG_CLEAN_OLD_MAIL_TIME,
     CONFIG_UPTIME_UPDATE,
     CONFIG_SKILL_CHANCE_ORANGE,
     CONFIG_SKILL_CHANCE_YELLOW,
@@ -375,6 +411,65 @@ enum WorldIntConfigs
     CONFIG_AUCTION_GETALL_DELAY,
     CONFIG_AUCTION_SEARCH_DELAY,
     CONFIG_TALENTS_INSPECTING,
+    CONFIG_RESPAWN_MINCHECKINTERVALMS,
+    CONFIG_RESPAWN_DYNAMICMODE,
+    CONFIG_RESPAWN_GUIDWARNLEVEL,
+    CONFIG_RESPAWN_GUIDALERTLEVEL,
+    CONFIG_RESPAWN_RESTARTQUIETTIME,
+    CONFIG_RESPAWN_DYNAMICMINIMUM_CREATURE,
+    CONFIG_RESPAWN_DYNAMICMINIMUM_GAMEOBJECT,
+    CONFIG_RESPAWN_GUIDWARNING_FREQUENCY,
+    CONFIG_SOCKET_TIMEOUTTIME_ACTIVE,
+    CONFIG_AHBOT_GUID,
+    CONFIG_AHBOT_UPDATEINTERVAL,
+    CONFIG_AHBOT_HOSTORYDAYS,
+    CONFIG_AHBOT_ITEMBUYMIN,
+    CONFIG_AHBOT_ITEMBUYMAX,
+    CONFIG_AHBOT_ITEMSELLMIN,
+    CONFIG_AHBOT_ITEMSELLMAX,
+    CONFIG_AHBOT_MAXSELL,
+    CONFIG_AHBOT_ALWAYSMONEY,
+    CONFIG_AHBOT_DEFAULTMINPRICE,
+    CONFIG_AHBOT_MAXITEMLEVEL,
+    CONFIG_AHBOT_MAXREQLEVEL,
+    CONFIG_AIPLYERBOT_COMMANDSERVERPORT,
+    CONFIG_AIPLYERBOT_GLOBALCOOLDOWN,
+    CONFIG_AIPLYERBOT_MAXWAITFORMOVE,
+    CONFIG_AIPLYERBOT_REACTDELAY,
+    CONFIG_AIPLYERBOT_CRITICALHEALTH,
+    CONFIG_AIPLYERBOT_LOWHEALTH,
+    CONFIG_AIPLYERBOT_MEDIUMHEALTH,
+    CONFIG_AIPLYERBOT_ALMOSTFULLHEALTH,
+    CONFIG_AIPLYERBOT_LOWMANA,
+    CONFIG_AIPLYERBOT_MEDIUMMANA,
+    CONFIG_AIPLYERBOT_ITERATIONSPERTICK,
+    CONFIG_AIPLYERBOT_MINRANDOMBOTS,
+    CONFIG_AIPLYERBOT_MAXRANDOMBOTS,
+    CONFIG_AIPLYERBOT_RANDOMBOTUPDATEINTERVAL,
+    CONFIG_AIPLYERBOT_RANDOMBOTCOUNTCHANGEMININTERVAL,
+    CONFIG_AIPLYERBOT_RANDOMBOTCOUNTCHANGEMAXINTERVAL,
+    CONFIG_AIPLYERBOT_MINRANDOMBOTINWORLDTIME,
+    CONFIG_AIPLYERBOT_MAXRANDOMBOTINWORLDTIME,
+    CONFIG_AIPLYERBOT_MINRANDOMBOTRANDOMIZETIME,
+    CONFIG_AIPLYERBOT_MAXRANDOMBOTRANDOMIZETIME,
+    CONFIG_AIPLYERBOT_MINRANDOMBOTREVIVETIME,
+    CONFIG_AIPLYERBOT_MAXRANDOMBOTREVIVETIME,
+    CONFIG_AIPLYERBOT_RANDOMBOTTELEPORTDISTANCE,
+    CONFIG_AIPLYERBOT_MINRANDOMBOTSPERINTERVAL,
+    CONFIG_AIPLYERBOT_MAXRANDOMBOTSPERINTERVAL,
+    CONFIG_AIPLYERBOT_MINRANDOMBOTSPRICECHANGEINTERVAL,
+    CONFIG_AIPLYERBOT_MAXRANDOMBOTSPRICECHANGEINTERVAL,
+    CONFIG_AIPLYERBOT_RANDOMBOTMINLEVEL,
+    CONFIG_AIPLYERBOT_RANDOMBOTMAXLEVEL,
+    CONFIG_AIPLYERBOT_RANDOMBOTTELELEVEL,
+    CONFIG_AIPLYERBOT_RANDOMBOTACCOUNTCOUNT,
+    CONFIG_AIPLYERBOT_RANDOMBOTGUILDCOUNT,
+    CONFIG_AIPLYERBOT_MINGUILDTASKCHANGETIME,
+    CONFIG_AIPLYERBOT_MAXGUILDTASKCHANGETIME,
+    CONFIG_AIPLYERBOT_MINGUILDTASKADVERTISEMENTTIME,
+    CONFIG_AIPLYERBOT_MAXGUILDTASKADVERTISEMENTTIME,
+    CONFIG_AIPLYERBOT_MINGUILDTASKREWARDTIME,
+    CONFIG_AIPLYERBOT_MAXGUILDTASKREWARDTIME,
     INT_CONFIG_VALUE_COUNT
 };
 
@@ -516,23 +611,18 @@ enum WorldStates
 };
 
 /// Storage class for commands issued for delayed execution
-struct CliCommandHolder
+struct TC_GAME_API CliCommandHolder
 {
-    typedef void Print(void*, const char*);
-    typedef void CommandFinished(void*, bool success);
+    typedef void(*Print)(void*, char const*);
+    typedef void(*CommandFinished)(void*, bool success);
 
     void* m_callbackArg;
-    char *m_command;
-    Print* m_print;
+    char* m_command;
+    Print m_print;
+    CommandFinished m_commandFinished;
 
-    CommandFinished* m_commandFinished;
-
-    CliCommandHolder(void* callbackArg, const char *command, Print* zprint, CommandFinished* commandFinished)
-        : m_callbackArg(callbackArg), m_command(strdup(command)), m_print(zprint), m_commandFinished(commandFinished)
-    {
-    }
-
-    ~CliCommandHolder() { free(m_command); }
+    CliCommandHolder(void* callbackArg, char const* command, Print zprint, CommandFinished commandFinished);
+    ~CliCommandHolder();
 
 private:
     CliCommandHolder(CliCommandHolder const& right) = delete;
@@ -567,7 +657,7 @@ class TC_GAME_API World
         bool RemoveSession(uint32 id);
         /// Get the number of current active sessions
         void UpdateMaxSessionCounters();
-        const SessionMap& GetAllSessions() const { return m_sessions; }
+        SessionMap const& GetAllSessions() const { return m_sessions; }
         uint32 GetActiveAndQueuedSessionCount() const { return m_sessions.size(); }
         uint32 GetActiveSessionCount() const { return m_sessions.size() - m_QueuedPlayer.size(); }
         uint32 GetQueuedSessionCount() const { return m_QueuedPlayer.size(); }
@@ -641,9 +731,9 @@ class TC_GAME_API World
         void LoadConfigSettings(bool reload = false);
 
         void SendWorldText(uint32 string_id, ...);
-        void SendGlobalText(const char* text, WorldSession* self);
+        void SendGlobalText(char const* text, WorldSession* self);
         void SendGMText(uint32 string_id, ...);
-        void SendServerMessage(ServerMessageType type, const char *text = "", Player* player = NULL);
+        void SendServerMessage(ServerMessageType type, const char *text = "", Player* player = nullptr);
         void SendGlobalMessage(WorldPacket* packet, WorldSession* self = nullptr, uint32 team = 0);
         void SendGlobalGMMessage(WorldPacket* packet, WorldSession* self = nullptr, uint32 team = 0);
         bool SendZoneMessage(uint32 zone, WorldPacket* packet, WorldSession* self = nullptr, uint32 team = 0);
@@ -654,7 +744,7 @@ class TC_GAME_API World
         uint32 GetShutDownTimeLeft() const { return m_ShutdownTimer; }
         void ShutdownServ(uint32 time, uint32 options, uint8 exitcode, const std::string& reason = std::string());
         uint32 ShutdownCancel();
-        void ShutdownMsg(bool show = false, Player* player = NULL, const std::string& reason = std::string());
+        void ShutdownMsg(bool show = false, Player* player = nullptr, const std::string& reason = std::string());
         static uint8 GetExitCode() { return m_ExitCode; }
         static void StopNow(uint8 exitcode) { m_stopEvent = true; m_ExitCode = exitcode; }
         static bool IsStopped() { return m_stopEvent; }
@@ -711,8 +801,8 @@ class TC_GAME_API World
         void LoadWorldStates();
 
         /// Are we on a "Player versus Player" server?
-        bool IsPvPRealm() const { return (getIntConfig(CONFIG_GAME_TYPE) == REALM_TYPE_PVP || getIntConfig(CONFIG_GAME_TYPE) == REALM_TYPE_RPPVP || getIntConfig(CONFIG_GAME_TYPE) == REALM_TYPE_FFA_PVP); }
-        bool IsFFAPvPRealm() const { return getIntConfig(CONFIG_GAME_TYPE) == REALM_TYPE_FFA_PVP; }
+        bool IsPvPRealm() const;
+        bool IsFFAPvPRealm() const;
 
         void KickAll();
         void KickAllLess(AccountTypes sec);
@@ -748,6 +838,15 @@ class TC_GAME_API World
 
         void UpdateAreaDependentAuras();
 
+        //npcbot
+        CharacterInfo const* GetCharacterInfo(ObjectGuid const& guid) const;
+        void AddCharacterInfo(ObjectGuid const& guid, uint32 accountId, std::string const& name, uint8 gender, uint8 race, uint8 playerClass, uint8 level);
+        void DeleteCharacterInfo(ObjectGuid const& guid) { _characterInfoStore.erase(guid); }
+        bool HasCharacterInfo(ObjectGuid const& guid) { return _characterInfoStore.find(guid) != _characterInfoStore.end(); }
+        void UpdateCharacterInfo(ObjectGuid const& guid, std::string const& name, uint8 gender = GENDER_NONE, uint8 race = RACE_NONE);
+        void UpdateCharacterInfoLevel(ObjectGuid const& guid, uint8 level);
+        //end npcbot
+
         uint32 GetCleaningFlags() const { return m_CleaningFlags; }
         void   SetCleaningFlags(uint32 flags) { m_CleaningFlags = flags; }
         void   ResetEventSeasonalQuests(uint16 event_id);
@@ -755,6 +854,10 @@ class TC_GAME_API World
         void ReloadRBAC();
 
         void RemoveOldCorpses();
+        void TriggerGuidWarning();
+        void TriggerGuidAlert();
+        bool IsGuidWarning() { return _guidWarn; }
+        bool IsGuidAlert() { return _guidAlert; }
 
     protected:
         void _UpdateGameTime();
@@ -848,8 +951,26 @@ class TC_GAME_API World
         typedef std::map<uint8, uint8> AutobroadcastsWeightMap;
         AutobroadcastsWeightMap m_AutobroadcastsWeights;
 
+        typedef std::unordered_map<ObjectGuid, CharacterInfo> CharacterInfoContainer;
+        CharacterInfoContainer _characterInfoStore;
+        void LoadCharacterInfoStore();
+
         void ProcessQueryCallbacks();
+
+        void SendGuidWarning();
+        void DoGuidWarningRestart();
+        void DoGuidAlertRestart();
         QueryCallbackProcessor _queryProcessor;
+
+        std::string _guidWarningMsg;
+        std::string _alertRestartReason;
+
+        std::mutex _guidAlertLock;
+
+        bool _guidWarn;
+        bool _guidAlert;
+        uint32 _warnDiff;
+        time_t _warnShutdownTime;
 };
 
 TC_GAME_API extern Realm realm;

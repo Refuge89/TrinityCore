@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 TrinityCore <http://www.trinitycore.org/>
+ * Copyright (C) 2008-2018 TrinityCore <https://www.trinitycore.org/>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -15,18 +15,20 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "ObjectMgr.h"
 #include "ScriptMgr.h"
-#include "ScriptedCreature.h"
-#include "ScriptedEscortAI.h"
-#include "PassiveAI.h"
-#include "Cell.h"
 #include "CellImpl.h"
-#include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
-#include "SpellAuraEffects.h"
-#include "SmartAI.h"
 #include "icecrown_citadel.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
+#include "PassiveAI.h"
+#include "ScriptedEscortAI.h"
+#include "SmartAI.h"
+#include "SpellMgr.h"
+#include "SpellScript.h"
+#include "TemporarySummon.h"
+#include "VehicleDefines.h"
 
 // Weekly quest support
 // * Deprogramming                (DONE)
@@ -115,7 +117,6 @@ enum ICCSpells
 
     // Alchemist Adrianna
     SPELL_HARVEST_BLIGHT_SPECIMEN   = 72155,
-    SPELL_HARVEST_BLIGHT_SPECIMEN25 = 72162,
 
     // Crok Scourgebane
     SPELL_ICEBOUND_ARMOR            = 70714,
@@ -353,7 +354,7 @@ class FrostwingGauntletRespawner
             creature->SetRespawnDelay(2);
 
             if (CreatureData const* data = creature->GetCreatureData())
-                creature->SetPosition(data->posX, data->posY, data->posZ, data->orientation);
+                creature->UpdatePosition(data->spawnPoint);
             creature->DespawnOrUnsummon();
 
             creature->SetCorpseDelay(corpseDelay);
@@ -717,12 +718,22 @@ class npc_alchemist_adrianna : public CreatureScript
     public:
         npc_alchemist_adrianna() : CreatureScript("npc_alchemist_adrianna") { }
 
-        bool OnGossipHello(Player* player, Creature* creature) override
+        struct npc_alchemist_adriannaAI : public ScriptedAI
         {
-            if (!creature->FindCurrentSpellBySpellId(SPELL_HARVEST_BLIGHT_SPECIMEN) && !creature->FindCurrentSpellBySpellId(SPELL_HARVEST_BLIGHT_SPECIMEN25))
-                if (player->HasAura(SPELL_ORANGE_BLIGHT_RESIDUE) && player->HasAura(SPELL_GREEN_BLIGHT_RESIDUE))
-                    creature->CastSpell(creature, SPELL_HARVEST_BLIGHT_SPECIMEN, false);
-            return false;
+            npc_alchemist_adriannaAI(Creature* creature) : ScriptedAI(creature) { }
+
+            bool GossipHello(Player* player) override
+            {
+                if (!me->FindCurrentSpellBySpellId(sSpellMgr->GetSpellIdForDifficulty(SPELL_HARVEST_BLIGHT_SPECIMEN, me)))
+                    if (player->HasAura(SPELL_ORANGE_BLIGHT_RESIDUE) && player->HasAura(SPELL_GREEN_BLIGHT_RESIDUE))
+                        DoCastSelf(SPELL_HARVEST_BLIGHT_SPECIMEN, false);
+                return false;
+            }
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetIcecrownCitadelAI<npc_alchemist_adriannaAI>(creature);
         }
 };
 
@@ -772,9 +783,9 @@ class boss_sister_svalna : public CreatureScript
                 }
             }
 
-            void EnterCombat(Unit* /*attacker*/) override
+            void JustEngagedWith(Unit* /*attacker*/) override
             {
-                _EnterCombat();
+                _JustEngagedWith();
                 if (Creature* crok = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_CROK_SCOURGEBANE)))
                     crok->AI()->Talk(SAY_CROK_COMBAT_SVALNA);
                 DoCastSelf(SPELL_DIVINE_SURGE, true);
@@ -821,12 +832,12 @@ class boss_sister_svalna : public CreatureScript
                 switch (action)
                 {
                     case ACTION_KILL_CAPTAIN:
-                        me->CastCustomSpell(SPELL_CARESS_OF_DEATH, SPELLVALUE_MAX_TARGETS, 1, me, true);
+                        DoCastSelf(SPELL_CARESS_OF_DEATH, CastSpellExtraArgs(TRIGGERED_FULL_MASK).AddSpellMod(SPELLVALUE_MAX_TARGETS, 1));
                         break;
                     case ACTION_START_GAUNTLET:
                         me->setActive(true);
                         _isEventInProgress = true;
-                        me->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_IMMUNE_TO_NPC);
+                        me->SetImmuneToAll(true);
                         events.ScheduleEvent(EVENT_SVALNA_START, 25000);
                         break;
                     case ACTION_RESURRECT_CAPTAINS:
@@ -860,7 +871,7 @@ class boss_sister_svalna : public CreatureScript
 
                 _isEventInProgress = false;
                 me->setActive(false);
-                me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_IMMUNE_TO_NPC);
+                me->SetImmuneToAll(false);
                 me->SetDisableGravity(false);
                 me->SetHover(false);
             }
@@ -876,7 +887,9 @@ class boss_sister_svalna : public CreatureScript
                         if (TempSummon* summon = target->SummonCreature(NPC_IMPALING_SPEAR, *target))
                         {
                             Talk(EMOTE_SVALNA_IMPALE, target);
-                            summon->CastCustomSpell(VEHICLE_SPELL_RIDE_HARDCODED, SPELLVALUE_BASE_POINT0, 1, target, false);
+                            CastSpellExtraArgs args;
+                            args.SpellValueOverrides.AddBP0(1);
+                            summon->CastSpell(target, VEHICLE_SPELL_RIDE_HARDCODED, args);
                             summon->SetFlag(UNIT_FIELD_FLAGS_2, UNIT_FLAG2_UNK1 | UNIT_FLAG2_ALLOW_ENEMY_INTERACT);
                         }
                         break;
@@ -911,7 +924,7 @@ class boss_sister_svalna : public CreatureScript
                             Talk(SAY_SVALNA_AGGRO);
                             break;
                         case EVENT_IMPALING_SPEAR:
-                            if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 1, 0.0f, true, -SPELL_IMPALING_SPEAR))
+                            if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 1, 0.0f, true, true, -SPELL_IMPALING_SPEAR))
                             {
                                 DoCast(me, SPELL_AETHER_SHIELD);
                                 DoCast(target, SPELL_IMPALING_SPEAR);
@@ -944,9 +957,9 @@ class npc_crok_scourgebane : public CreatureScript
     public:
         npc_crok_scourgebane() : CreatureScript("npc_crok_scourgebane") { }
 
-        struct npc_crok_scourgebaneAI : public npc_escortAI
+        struct npc_crok_scourgebaneAI : public EscortAI
         {
-            npc_crok_scourgebaneAI(Creature* creature) : npc_escortAI(creature),
+            npc_crok_scourgebaneAI(Creature* creature) : EscortAI(creature),
                 _instance(creature->GetInstanceScript()), _respawnTime(creature->GetRespawnDelay()),
                 _corpseDelay(creature->GetCorpseDelay())
             {
@@ -1005,9 +1018,9 @@ class npc_crok_scourgebane : public CreatureScript
                 }
             }
 
-            void SetGUID(ObjectGuid guid, int32 type/* = 0*/) override
+            void SetGUID(ObjectGuid const& guid, int32 id) override
             {
-                if (type == ACTION_VRYKUL_DEATH)
+                if (id == ACTION_VRYKUL_DEATH)
                 {
                     _aliveTrash.erase(guid);
                     if (_aliveTrash.empty())
@@ -1025,13 +1038,13 @@ class npc_crok_scourgebane : public CreatureScript
                 }
             }
 
-            void WaypointReached(uint32 waypointId) override
+            void WaypointReached(uint32 waypointId, uint32 /*pathId*/) override
             {
                 switch (waypointId)
                 {
                     // pause pathing until trash pack is cleared
                     case 0:
-                        me->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC);
+                        me->SetImmuneToNPC(false);
                         Talk(SAY_CROK_COMBAT_WP_0);
                         if (!_aliveTrash.empty())
                             SetEscortPaused(true);
@@ -1056,7 +1069,7 @@ class npc_crok_scourgebane : public CreatureScript
                 }
             }
 
-            void WaypointStart(uint32 waypointId) override
+            void WaypointStarted(uint32 waypointId, uint32 /*pathId*/) override
             {
                 _currentWPid = waypointId;
                 switch (waypointId)
@@ -1086,7 +1099,7 @@ class npc_crok_scourgebane : public CreatureScript
                         std::list<Creature*> temp;
                         FrostwingVrykulSearcher check(me, 80.0f);
                         Trinity::CreatureListSearcher<FrostwingVrykulSearcher> searcher(me, temp, check);
-                        me->VisitNearbyGridObject(80.0f, searcher);
+                        Cell::VisitGridObjects(me, searcher, 80.0f);
 
                         _aliveTrash.clear();
                         for (std::list<Creature*>::iterator itr = temp.begin(); itr != temp.end(); ++itr)
@@ -1110,10 +1123,10 @@ class npc_crok_scourgebane : public CreatureScript
                 if (!_wipeCheckTimer)
                 {
                     _wipeCheckTimer = 1000;
-                    Player* player = NULL;
+                    Player* player = nullptr;
                     Trinity::AnyPlayerInObjectRangeCheck check(me, 60.0f);
                     Trinity::PlayerSearcher<Trinity::AnyPlayerInObjectRangeCheck> searcher(me, player, check);
-                    me->VisitNearbyWorldObject(60.0f, searcher);
+                    Cell::VisitWorldObjects(me, searcher, 60.0f);
                     // wipe
                     if (!player)
                     {
@@ -1122,7 +1135,7 @@ class npc_crok_scourgebane : public CreatureScript
                         {
                             FrostwingGauntletRespawner respawner;
                             Trinity::CreatureWorker<FrostwingGauntletRespawner> worker(me, respawner);
-                            me->VisitNearbyGridObject(333.0f, worker);
+                            Cell::VisitGridObjects(me, worker, 333.0f);
                             Talk(SAY_CROK_DEATH);
                         }
                         return;
@@ -1277,7 +1290,7 @@ struct npc_argent_captainAI : public ScriptedAI
             }
         }
 
-        void EnterCombat(Unit* /*target*/) override
+        void JustEngagedWith(Unit* /*target*/) override
         {
             me->SetHomePosition(*me);
             if (IsUndead)
@@ -1424,10 +1437,10 @@ class npc_captain_arnath : public CreatureScript
         private:
             Creature* FindFriendlyCreature() const
             {
-                Creature* target = NULL;
+                Creature* target = nullptr;
                 Trinity::MostHPMissingInRange u_check(me, 60.0f, 0);
                 Trinity::CreatureLastSearcher<Trinity::MostHPMissingInRange> searcher(me, target, u_check);
-                me->VisitNearbyGridObject(60.0f, searcher);
+                Cell::VisitGridObjects(me, searcher, 60.0f);
                 return target;
             }
         };
@@ -1665,7 +1678,7 @@ class npc_frostwing_vrykul : public CreatureScript
 
         CreatureAI* GetAI(Creature* creature) const override
         {
-            return new npc_frostwing_vrykulAI(creature);
+            return GetIcecrownCitadelAI<npc_frostwing_vrykulAI>(creature);
         }
 };
 
@@ -1709,7 +1722,7 @@ class npc_impaling_spear : public CreatureScript
 
         CreatureAI* GetAI(Creature* creature) const override
         {
-            return new npc_impaling_spearAI(creature);
+            return GetIcecrownCitadelAI<npc_impaling_spearAI>(creature);
         }
 };
 
@@ -1759,7 +1772,7 @@ class npc_arthas_teleport_visual : public CreatureScript
                 return GetIcecrownCitadelAI<npc_arthas_teleport_visualAI>(creature);
 
             // Default to no script
-            return NULL;
+            return nullptr;
         }
 };
 
@@ -1777,7 +1790,8 @@ class spell_icc_stoneform : public SpellScriptLoader
                 if (Creature* target = GetTarget()->ToCreature())
                 {
                     target->SetReactState(REACT_PASSIVE);
-                    target->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_IMMUNE_TO_PC);
+                    target->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE);
+                    target->SetImmuneToPC(true);
                     target->SetUInt32Value(UNIT_NPC_EMOTESTATE, EMOTE_STATE_CUSTOM_SPELL_02);
                 }
             }
@@ -1787,7 +1801,8 @@ class spell_icc_stoneform : public SpellScriptLoader
                 if (Creature* target = GetTarget()->ToCreature())
                 {
                     target->SetReactState(REACT_AGGRESSIVE);
-                    target->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_IMMUNE_TO_PC);
+                    target->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE);
+                    target->SetImmuneToPC(false);
                     target->SetUInt32Value(UNIT_NPC_EMOTESTATE, 0);
                 }
             }
@@ -2009,7 +2024,7 @@ class spell_svalna_revive_champion : public SpellScriptLoader
             void RemoveAliveTarget(std::list<WorldObject*>& targets)
             {
                 targets.remove_if(AliveCheck());
-                Trinity::Containers::RandomResizeList(targets, 2);
+                Trinity::Containers::RandomResize(targets, 2);
             }
 
             void Land(SpellEffIndex /*effIndex*/)
@@ -2097,6 +2112,49 @@ class spell_icc_soul_missile : public SpellScriptLoader
             return new spell_icc_soul_missile_SpellScript();
         }
 };
+
+class spell_trigger_spell_from_caster_SpellScript : public SpellScript
+{
+    PrepareSpellScript(spell_trigger_spell_from_caster_SpellScript);
+
+    public:
+        spell_trigger_spell_from_caster_SpellScript(uint32 triggerId, TriggerCastFlags triggerFlags)
+            : SpellScript(), _triggerId(triggerId), _triggerFlags(triggerFlags) { }
+
+    private:
+        bool Validate(SpellInfo const* /*spell*/) override
+        {
+            return ValidateSpellInfo({ _triggerId });
+        }
+
+        void HandleTrigger()
+        {
+            GetCaster()->CastSpell(GetHitUnit(), _triggerId, _triggerFlags);
+        }
+
+        void Register() override
+        {
+            AfterHit += SpellHitFn(spell_trigger_spell_from_caster_SpellScript::HandleTrigger);
+        }
+
+        uint32 _triggerId;
+        TriggerCastFlags _triggerFlags;
+};
+
+spell_trigger_spell_from_caster::spell_trigger_spell_from_caster(char const* scriptName, uint32 triggerId)
+    : SpellScriptLoader(scriptName), _triggerId(triggerId), _triggerFlags(TRIGGERED_FULL_MASK)
+{
+}
+
+spell_trigger_spell_from_caster::spell_trigger_spell_from_caster(char const* scriptName, uint32 triggerId, TriggerCastFlags triggerFlags)
+    : SpellScriptLoader(scriptName), _triggerId(triggerId), _triggerFlags(triggerFlags)
+{
+}
+
+SpellScript* spell_trigger_spell_from_caster::GetSpellScript() const
+{
+    return new spell_trigger_spell_from_caster_SpellScript(_triggerId, _triggerFlags);
+}
 
 class at_icc_saurfang_portal : public AreaTriggerScript
 {
