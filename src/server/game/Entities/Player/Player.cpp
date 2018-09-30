@@ -16965,8 +16965,8 @@ void Player::AutoQuestCompleteDisplayQuestGiver(uint32 p_questId)
 	_sum->SetReactState(REACT_PASSIVE);
 	// Display quest popup
 	m_lastQuestCompleted = sObjectMgr->GetQuestTemplate(p_questId);
-	PrepareGossipMenu(_sum, _sum->GetCreatureTemplate()->GossipMenuId, true);
-	SendPreparedGossip(_sum);
+	//PrepareGossipMenu(_sum, _sum->GetCreatureTemplate()->GossipMenuId, true);
+	//SendPreparedGossip(_sum);
 }
 
 /*********************************************************/
