@@ -152,10 +152,18 @@ bool LootItem::AllowedForPlayer(Player const* player) const
     }
 
     // not show loot for players without profession or those who already know the recipe
-    if ((pProto->Flags & ITEM_FLAG_HIDE_UNUSABLE_RECIPE || sWorld->getBoolConfig(CONFIG_LOOT_ONLY_FOR_PLAYER) && pProto->Class == ITEM_CLASS_RECIPE) && (!player->HasSkill(pProto->RequiredSkill) || player->HasSpell(pProto->Spells[1].SpellId)))
+    if ((pProto->Flags & ITEM_FLAG_HIDE_UNUSABLE_RECIPE || sWorld->getBoolConfig(CONFIG_LOOT_ONLY_FOR_PLAYER) && pProto->Class == ITEM_CLASS_RECIPE))
     {
-        TC_LOG_DEBUG("lasyan3.customloot", "    |- Player does not have the profession for this item, or already know the recipe!");
-        return false;
+        if (!player->HasSkill(pProto->RequiredSkill))
+        {
+            TC_LOG_DEBUG("lasyan3.customloot", "    |- Player does not have the profession for this item!");
+            return false;
+        }
+        if (player->HasSpell(pProto->Spells[1].SpellId))
+        {
+            TC_LOG_DEBUG("lasyan3.customloot", "    |- Player already knows the recipe!");
+            return false;
+        }
     }
 
     // not show loot for not own team
@@ -375,7 +383,7 @@ NotNormalLootItemList* Loot::FillQuestLoot(Player* player)
     {
         LootItem &item = quest_items[i];
 
-        if (!item.is_looted && (item.AllowedForPlayer(player) || (item.follow_loot_rules && player->GetGroup() && ((player->GetGroup()->GetLootMethod() == MASTER_LOOT && player->GetGroup()->GetMasterLooterGuid() == player->GetGUID()) || player->GetGroup()->GetLootMethod() != MASTER_LOOT))))
+        if (!item.is_looted && (item.AllowedForPlayer(player) || (item.follow_loot_rules && player->GetGroup() && ((player->GetGroup()->GetLootMethod() == MASTER_LOOT && player->GetGroup()->GetMasterLooterGuid() == player->GetGUID()) || player->GetGroup()->GetLootMethod() != MASTER_LOOT)) || player->CanDropQuestItem(item.itemid) > 0))
         {
             ql->push_back(NotNormalLootItem(i));
 
@@ -692,7 +700,7 @@ ByteBuffer& operator<<(ByteBuffer& b, LootView const& lv)
             // blocked rolled items and quest items, and !ffa items
             for (uint8 i = 0; i < l.items.size(); ++i)
             {
-                if (!l.items[i].is_looted && !l.items[i].freeforall && l.items[i].conditions.empty() && l.items[i].AllowedForPlayer(lv.viewer))
+                if (!l.items[i].is_looted && !l.items[i].freeforall && l.items[i].conditions.empty() && (l.items[i].AllowedForPlayer(lv.viewer) || lv.viewer->CanDropQuestItem(l.items[i].itemid) > 0))
                 {
                     uint8 slot_type;
 
@@ -747,7 +755,7 @@ ByteBuffer& operator<<(ByteBuffer& b, LootView const& lv)
         {
             for (uint8 i = 0; i < l.items.size(); ++i)
             {
-                if (!l.items[i].is_looted && !l.items[i].freeforall && l.items[i].conditions.empty() && l.items[i].AllowedForPlayer(lv.viewer))
+                if (!l.items[i].is_looted && !l.items[i].freeforall && l.items[i].conditions.empty() && (l.items[i].AllowedForPlayer(lv.viewer) || lv.viewer->CanDropQuestItem(l.items[i].itemid) > 0))
                 {
                     if (!l.roundRobinPlayer.IsEmpty() && lv.viewer->GetGUID() != l.roundRobinPlayer)
                         // item shall not be displayed.
@@ -766,7 +774,7 @@ ByteBuffer& operator<<(ByteBuffer& b, LootView const& lv)
             uint8 slot_type = lv.permission == OWNER_PERMISSION ? LOOT_SLOT_TYPE_OWNER : LOOT_SLOT_TYPE_ALLOW_LOOT;
             for (uint8 i = 0; i < l.items.size(); ++i)
             {
-                if (!l.items[i].is_looted && !l.items[i].freeforall && l.items[i].conditions.empty() && l.items[i].AllowedForPlayer(lv.viewer))
+                if (!l.items[i].is_looted && !l.items[i].freeforall && l.items[i].conditions.empty() &&( l.items[i].AllowedForPlayer(lv.viewer) || lv.viewer->CanDropQuestItem(l.items[i].itemid) > 0))
                 {
                     b << uint8(i) << l.items[i];
                     b << uint8(slot_type);

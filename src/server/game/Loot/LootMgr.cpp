@@ -297,6 +297,8 @@ bool LootStoreItem::Roll(bool rate) const
     float _rate;
     switch (pProto->Quality)
     {
+        case ITEM_QUALITY_POOR: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_POOR); break;
+        case ITEM_QUALITY_NORMAL: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_NORMAL); break;
         case ITEM_QUALITY_UNCOMMON: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_UNCOMMON); break;
         case ITEM_QUALITY_RARE: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_RARE); break;
         case ITEM_QUALITY_EPIC: _rate = sWorld->getFloatConfig(CONFIG_MINRATE_DROP_ITEM_EPIC); break;
@@ -682,7 +684,7 @@ bool LootTemplate::HasQuestDropForPlayer(LootTemplateMap const& store, Player co
             if (Referenced->second->HasQuestDropForPlayer(store, player, item->groupid))
                 return true;
         }
-        else if (player->HasQuestForItem(item->itemid))
+        else if (player->HasQuestForItem(item->itemid) || ((Player *)player)->CanDropQuestItem(item->itemid) > 0)
             return true;                                    // active quest drop found
     }
 
